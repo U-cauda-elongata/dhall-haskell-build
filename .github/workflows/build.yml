@@ -33,6 +33,15 @@ jobs:
           submodules: recursive
       - name: Register binfmts
         run: docker run --privileged --rm docker/binfmt:a7996909642ee92942dcd6cff44b9b95f08dad64
+      - name: Set up swapfile
+        # The runner has 7 GB of RAM, which is insufficient for this job.
+        # It has 14 GB of SSD so let's use 13 GB of that as a swapfile.
+        # <https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources>
+        run: |
+          sudo fallocate --length 13G /swapfile &&
+          sudo chmod 600 /swapfile &&
+          sudo mkswap /swapfile &&
+          sudo swapon /swapfile
       - name: Build `${{ matrix.package }}`
         run: ./build.sh ${{ matrix.target }} ${{ matrix.package }}
       - name: Upload the artifact
