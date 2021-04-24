@@ -17,17 +17,38 @@ jobs:
           # - powerpc64le-linux-gnu
           # - s390x-linux-gnu
           # - x86-64-linux-gnu
+        package:
+          # Building them all at once would cause GitHub Actions runner to time out.
+          - dhall
+          - dhall-json
+          - dhall-bash
+          - dhall-lsp-server
+          - dhall-nix
+          - dhall-openapi
+          - dhall-yaml
+          - dhall-docs
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
       - name: Register binfmts
         run: docker run --privileged --rm docker/binfmt:a7996909642ee92942dcd6cff44b9b95f08dad64
-      - name: Build `dhall-haskell`
-        run: ./build.sh ${{ matrix.target }}
+      - name: Build `${{ matrix.package }}`
+        run: ./build.sh ${{ matrix.target }} ${{ matrix.package }}
+      - name: Upload the artifact
+        uses: actions/upload-artifact@v2
+        with:
+          path: dist/*
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v2
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
-          files: assets/*
+          files: artifact/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
