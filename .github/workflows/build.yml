@@ -9,6 +9,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    outputs:
+      timeout: ${{ steps.build.outputs.timeout }}
     strategy:
       matrix:
         target:
@@ -17,20 +19,24 @@ jobs:
           # - powerpc64le-linux-gnu
           # - s390x-linux-gnu
           # - x86-64-linux-gnu
-        package:
-          # Building them all at once would cause GitHub Actions runner to time out.
-          - dhall
-          - dhall-json
-          - dhall-bash
-          - dhall-lsp-server
-          - dhall-nix
-          - dhall-openapi
-          - dhall-yaml
-          - dhall-docs
     steps:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: Generate a UUID for the run
+        id: run_id
+        run: echo "::set-output uuid=$(uuidgen)"
+      - name: Cache `.stack-work`
+        uses: actions/cache@v2
+        with:
+          path: dhall-haskell/.stack-work
+          # Construct a key that does never match previous caches by primary key
+          # to make the `cache` action save a new cache.
+          # Use a UUID as `github.run_id` and `github.run_number` do not change between re-runs.
+          key: ${{ runner.os }}-stack-work-${{ matrix.target }}-${{ hashFiles('dhall-haskell/**.yaml') }}-${{ github.run_id }}-${{ steps.run_id.outputs.uuid }}
+          restore-keys: |
+            ${{ runner.os }}-stack-work-${{ matrix.target }}-${{ hashFiles('dhall-haskell/**.yaml') }}-${{ github.run_id }}-
+            ${{ runner.os }}-stack-work-${{ matrix.target }}-${{ hashFiles('dhall-haskell/**.yaml') }}-
       - name: Register binfmts
         run: docker run --privileged --rm docker/binfmt:a7996909642ee92942dcd6cff44b9b95f08dad64
       - name: Set up swapfile
@@ -42,9 +48,22 @@ jobs:
           sudo chmod 600 /swapfile &&
           sudo mkswap /swapfile &&
           sudo swapon /swapfile
-      - name: Build `${{ matrix.package }}`
-        run: ./build.sh ${{ matrix.target }} ${{ matrix.package }}
+      - name: Build `dhall-haskell`
+        id: build
+        run: |
+          timeout 355m ./build.sh ${{ matrix.target }} \
+          || case "${?}" in
+          124)
+            echo '::error ::Timeout exceeded'
+            echo '::set-output name=timeout::0'
+            # Do not set error status code here in order to save the cache.
+            ;;
+          *)
+            exit "${?}"
+            ;;
+          esac
       - name: Upload the artifact
+        if: steps.build.outputs.timeout != '0'
         uses: actions/upload-artifact@v2
         with:
           path: dist/*
@@ -55,6 +74,12 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v2
+      - name: Check the previous job's status
+        run: |
+          if [ '${{ needs.build.outputs.timeout }}' ]; then
+            echo '::error ::Suspending due to timeout'
+            exit 1
+          fi
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
